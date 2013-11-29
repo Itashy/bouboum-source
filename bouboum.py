@@ -11,6 +11,7 @@ from packets.bytearray import ByteArray
 
 import sys
 import struct
+import json
 
 import MySQLdb
 import random
@@ -39,6 +40,10 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 
 		self.username = ""
 		self.playerCode = 0
+		self.isDead = False
+		self.look = 0
+		self.shopitems = []
+		self.score = 0
 		self.room = None
 
 	def connectionMade(self):
@@ -123,6 +128,25 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 				clientLangue, clientOS, clientFlashV = p.readUTF(), p.readUTF(), p.readUTF()
 				_("New client at {community}. Used Flash {flashV} at {system}".format(community=clientLangue, flashV=clientFlashV, system=clientOS))
 
+		elif eventToken1 == packets.opcodes.opcodes.shop.shop:
+			if eventToken2 == packets.opcodes.opcodes.shop.shop_req:
+				p = ByteArray()
+				p.writeByte(102)
+				p.writeByte(70)
+
+				p.writeInt(self.nutsCount)
+				p.writeByte(self.look) # current fur
+				shopList = '0,0;17,50;3,100;4,200;6,400;19,500;2,800;7,1000;9,1000;8,1500;5,2000'.split(';')#{0: 0, 1: 0, 2: 17, 3: 50, 4: 3, 5: 100, 6: 4, 7: 200, 8: 6, 9: 400, 10: 19, 11: 500, 12: 2, 13: 800, 14: 7, 15: 1000, 16: 9, 17: 1000, 18: 8, 19: 1500, 20: 5, 21: 2000} #[0, 0, 17, 0, 3, 100, 4, 200, 6, 400, 19, 500, 2, 800, 7, 1000, 9, 1000, 8, 1500, 5, 2000]
+
+				p.writeByte(len(shopList)*2)
+
+				for x in shopList:
+					item, cost = map(int, x.split(','))
+					if item in self.shopitems: cost = 0
+					p.writeByte(item)
+					p.writeShort(cost)
+				self.sendBData(p)
+
 		print packetCodes, repr(p.toString())
 
 	def sendData(self, tokens, values):
@@ -143,10 +167,13 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 
 	def authenticate(self, username, passwordHash):
 		username = username.lower().capitalize()
-		if self.frooze: return 'INCORRECT'
+		while self.frooze: pass
 		if username.startswith("*"):
 			self.username = username
 			self.playerCode = self.serveur.generatePlayerCode()
+			self.nutsCount = 0
+			self.shopitems = []
+			self.look = 0
 			return True
 		self.Cursor.execute("SELECT * FROM users WHERE username=%s", (username,))
 		row = self.Cursor.fetchone()
@@ -155,6 +182,9 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		else:
 			self.username = row['username']
 			self.playerCode = row['id']
+			self.nutsCount = row['shopnuts']
+			self.shopitems = json.loads(row['shopitems'])
+			self.look = int(row['look'])
 			return True
 
 	def enterRoom(self, roomName):
@@ -163,57 +193,7 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		if room:
 			self.room = room
 
-			p = ByteArray()
-			p.writeByte(20)
-			p.writeByte(4)
-
-			p.writeBytes('\x01\x00')
-			self.sendBData(p)
-
 			self.sendEnterRoom(roomName)
-
-			p = ByteArray()
-			p.writeByte(102)
-			p.writeByte(67)
-
-			p.writeBytes('\x00')
-			self.sendBData(p)
-
-			p = ByteArray()
-			p.writeByte(102)
-			p.writeByte(68)
-
-			p.writeBytes('\x01')
-			self.sendBData(p)
-
-			p = ByteArray()
-			p.writeByte(102)
-			p.writeByte(52)
-
-			p.writeBytes('TU\t\x00\x08\x00\t\x01')
-			self.sendBData(p)
-
-			p = ByteArray()
-			p.writeByte(102)
-			p.writeByte(13)
-
-			p.writeBytes('TU\x00')
-			self.sendBData(p)
-
-			p = ByteArray()
-			p.writeByte(5)
-			p.writeByte(22)
-
-			p.writeBytes('\x00x')
-			self.sendBData(p)
-
-			p = ByteArray()
-			p.writeByte(28)
-			p.writeByte(2)
-
-			p.writeBytes('R\x93\x86\x80')
-			self.sendBData(p)
-
 	#   /$$$$$$$                      /$$                   /$$              
 	#  | $$__  $$                    | $$                  | $$              
 	#  | $$  \ $$  /$$$$$$   /$$$$$$$| $$   /$$  /$$$$$$  /$$$$$$    /$$$$$$$
@@ -307,15 +287,31 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		if one: clients = {clients.username:clients}
 		for client in clients.values():
 			p.writeUTF(client.username)
-			p.writeShort(28634)
-			p.writeBoolean(False) # is dead (???)
-			p.writeByte(0)
-			p.writeShort(4)
+			p.writeShort(28634) #28634
+			p.writeBoolean(client.isDead) # is dead (???)
+			p.writeByte(client.look) # skin ID
+			p.writeShort(client.score) # score
 			p.writeShort(1250) # rang
 			p.writeByte(25) # x
 			p.writeByte(3) # y
 
 		#p.writeBytes('\x00\x01\x00\x06SpaowiTU\x01\x00\x00\x00\x04\xe2\x00\x00')
+		self.sendBData(p)
+
+	def sendRoundTime(self, s=120):
+		p = ByteArray()
+		p.writeByte(5)
+		p.writeByte(22)
+
+		p.writeShort(s)
+		self.sendBData(p)
+
+	def sendBombCount(self):#, bc, ec):
+		p = ByteArray()
+		p.writeByte(20)
+		p.writeByte(4)
+
+		p.writeBytes('\x01\x00')
 		self.sendBData(p)
 
 	def sendPlayerJoined(self, client):
@@ -331,6 +327,46 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		#p.writeBytes('\x00\x0c*Hamster_lbc')
 		self.sendBData(p)
 
+	def startPlay(self):
+		self.isDead = False
+		self.score = 0
+		self.sendRoundTime()
+
+		p = ByteArray()
+		p.writeByte(102)
+		p.writeByte(67)
+
+		p.writeBytes('\x00')
+		self.sendBData(p)
+
+		p = ByteArray()
+		p.writeByte(102)
+		p.writeByte(68)
+
+		p.writeBytes('\x01')
+		self.sendBData(p)
+
+		p = ByteArray()
+		p.writeByte(102)
+		p.writeByte(52)
+
+		p.writeBytes('TU\t\x00\x08\x00\t\x01')
+		self.sendBData(p)
+
+		p = ByteArray()
+		p.writeByte(102)
+		p.writeByte(13)
+
+		p.writeBytes('TU\x00')
+		self.sendBData(p)
+
+		p = ByteArray()
+		p.writeByte(28)
+		p.writeByte(2)
+
+		p.writeBytes('R\x93\x86\x80')
+		self.sendBData(p)
+
 class BouboumRoom(object):
 
 	def __init__(self, serveur, roomName):
@@ -340,12 +376,11 @@ class BouboumRoom(object):
 		self.currentWorld = [1, 1, []] # [world, blocks, [block positions]]
 
 		self.positions = []
-		self.generateWorld()
+
+		self.newRoundTimer = reactor.callLater(0.2, self.newRound)
 
 	def addClient(self, client):
 		self.Clients[client.username] = client
-		client.sendNewRound(self.currentWorld)
-		client.sendPlayerList(self.Clients)
 		for player in self.Clients.values():
 			if not player == client:
 				player.sendPlayerJoined(client)
@@ -360,6 +395,18 @@ class BouboumRoom(object):
 	def generateWorld(self):
 		world = [random.choice([0, 1, 1, 0, 0, 1, 0, 0, 2]) for x in range(702)]
 		self.currentWorld[2] = world
+
+	def newRound(self):
+		self.newRoundTimer = None
+		self.generateWorld()
+
+		for client in self.Clients.values():
+			client.sendPlayerList(self.Clients)
+			client.sendNewRound(self.currentWorld)
+			client.startPlay()
+
+		self.newRoundTimer = reactor.callLater(120, self.newRound)
+		
 
 class BouboumServeur(Factory):
 	protocol = BouboumClient

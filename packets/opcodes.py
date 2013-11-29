@@ -23,3 +23,7 @@ class opcodes:
 		system = 75
 
 		system_info = 32
+	class shop:
+		shop = 43
+
+		shop_req = 57
