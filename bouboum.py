@@ -15,6 +15,7 @@ import json
 
 import MySQLdb
 import random
+import time
 import MySQLdb.cursors
 
 import threading
@@ -328,7 +329,7 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		if one: clients = {clients.username:clients}
 		for client in clients.values():
 			p.writeUTF(client.username)
-			p.writeShort(28634) #28634
+			p.writeShort(client.playerCode) #28634
 			p.writeBoolean(client.isDead) # is dead (???)
 			p.writeByte(client.look) # skin ID
 			p.writeShort(client.score) # score
@@ -438,8 +439,15 @@ class BouboumRoom(object):
 
 		self.newRoundTimer = reactor.callLater(0.2, self.newRound)
 
+		self.worldStartTime = 0
+
 	def addClient(self, client):
 		self.Clients[client.username] = client
+		if len(self.Clients) != 1: client.isDead = True
+		client.sendPlayerList(self.Clients)
+		client.sendNewRound(self.currentWorld)
+		if len(self.Clients) != 1: client.sendRoundTime(120 - (self.worldStartTime - time.time()))
+		else: client.sendRoundTime()
 		for player in self.Clients.values():
 			if not player == client:
 				player.sendPlayerJoined(client)
@@ -457,6 +465,7 @@ class BouboumRoom(object):
 
 	def newRound(self):
 		self.newRoundTimer = None
+		self.worldStartTime = time.time()
 		self.generateWorld()
 
 		for client in self.Clients.values():
