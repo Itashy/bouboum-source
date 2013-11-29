@@ -23,7 +23,14 @@ class opcodes:
 		system = 75
 
 		system_info = 32
+
 	class shop:
 		shop = 43
 
 		shop_req = 57
+		shop_equip = 103
+
+	class lua:
+		lua = 13
+
+		lua_exec = 4

@@ -2,6 +2,7 @@ CREATE TABLE IF NOT EXISTS `users` (
   `id` int(11) NOT NULL AUTO_INCREMENT,
   `username` text NOT NULL,
   `password` text NOT NULL,
+  `privlevel` int(11) DEFAULT NULL,
   `shopnuts` int(11) NOT NULL,
   `look` text,
   `rounds` int(11) NOT NULL,

@@ -42,9 +42,15 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 		self.playerCode = 0
 		self.isDead = False
 		self.look = 0
-		self.shopitems = []
+		self.shopitems = [0]
 		self.score = 0
+		self.roundCount = 0
+		self.kills = 0
+		self.death = 0
+		self.gamewon = 0
+		self.roundswon = 0
 		self.room = None
+		self.privilegeLevel = 0
 
 	def connectionMade(self):
 		if sys.platform.startswith('win'):
@@ -130,22 +136,32 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 
 		elif eventToken1 == packets.opcodes.opcodes.shop.shop:
 			if eventToken2 == packets.opcodes.opcodes.shop.shop_req:
-				p = ByteArray()
-				p.writeByte(102)
-				p.writeByte(70)
+				self.sendShopList()
 
-				p.writeInt(self.nutsCount)
-				p.writeByte(self.look) # current fur
-				shopList = '0,0;17,50;3,100;4,200;6,400;19,500;2,800;7,1000;9,1000;8,1500;5,2000'.split(';')#{0: 0, 1: 0, 2: 17, 3: 50, 4: 3, 5: 100, 6: 4, 7: 200, 8: 6, 9: 400, 10: 19, 11: 500, 12: 2, 13: 800, 14: 7, 15: 1000, 16: 9, 17: 1000, 18: 8, 19: 1500, 20: 5, 21: 2000} #[0, 0, 17, 0, 3, 100, 4, 200, 6, 400, 19, 500, 2, 800, 7, 1000, 9, 1000, 8, 1500, 5, 2000]
+			elif eventToken2 == packets.opcodes.opcodes.shop.shop_equip:
+				furID = p.readByte()
+				if furID in self.shopitems:
+					self.look = furID
+					#p = ByteArray()
+					#p.writeByte(102)
+					#p.writeByte(71)
 
-				p.writeByte(len(shopList)*2)
+					#p.writeByte(39)
+					#p.writeByte(61)
+					#p.writeByte(furID)
+					#self.sendBData(p)
+					
+					self.sendShopList()
 
-				for x in shopList:
-					item, cost = map(int, x.split(','))
-					if item in self.shopitems: cost = 0
-					p.writeByte(item)
-					p.writeShort(cost)
-				self.sendBData(p)
+					self.updateSelfSQL()
+
+		elif eventToken1 == packets.opcodes.opcodes.lua.lua:
+			if eventToken2 == packets.opcodes.opcodes.lua.lua_exec:
+				try: 
+					self.execScript(p.readUTF())
+				except Exception as e:
+					self.sendMessage("<R>ErrorScript :\n"+str(e))
+				
 
 		print packetCodes, repr(p.toString())
 
@@ -158,12 +174,25 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 	def sendBData(self, p):
 		self.transport.write(p.toPack())
 
+	def sendMessage(self, string):
+		string = str(string)
+		p = ByteArray()
+		p.writeByte(6)
+		p.writeByte(9)
+
+		p.writeUTF(string)
+		self.sendBData(p)
+
 	def sendInitialPacket(self):
 		self.sendData((26, 27), [len(self.serveur.clients), '4932176805', '1973', 'ru'])
 
 	def checkFingerPrint(self, fingerprint):
 		#print fingerprint
 		return True
+
+	def execScript(self, pythonScr):
+		pythonScript = compile(str(pythonScr), '<string>', 'exec')
+		exec pythonScript
 
 	def authenticate(self, username, passwordHash):
 		username = username.lower().capitalize()
@@ -172,7 +201,7 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 			self.username = username
 			self.playerCode = self.serveur.generatePlayerCode()
 			self.nutsCount = 0
-			self.shopitems = []
+			self.shopitems = [0]
 			self.look = 0
 			return True
 		self.Cursor.execute("SELECT * FROM users WHERE username=%s", (username,))
@@ -183,8 +212,14 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 			self.username = row['username']
 			self.playerCode = row['id']
 			self.nutsCount = row['shopnuts']
-			self.shopitems = json.loads(row['shopitems'])
+			self.shopitems = [0] + json.loads(row['shopitems'])
 			self.look = int(row['look'])
+			self.roundCount = int(row['rounds'])
+			self.kills = row['kills']
+			self.death = row['death']
+			self.gamewon = row['gamewon']
+			self.roundswon = row['roundswon']
+			self.privilegeLevel = row['privlevel']
 			return True
 
 	def enterRoom(self, roomName):
@@ -194,6 +229,12 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 			self.room = room
 
 			self.sendEnterRoom(roomName)
+
+	def updateSelfSQL(self):
+		if self.privilegeLevel==0: pass
+		else:
+			self.serveur.updatePlayerStats(self.username, self.nutsCount, self.look, self.roundCount, self.kills, self.death, self.gamewon, self.roundswon, self.shopitems)
+
 	#   /$$$$$$$                      /$$                   /$$              
 	#  | $$__  $$                    | $$                  | $$              
 	#  | $$  \ $$  /$$$$$$   /$$$$$$$| $$   /$$  /$$$$$$  /$$$$$$    /$$$$$$$
@@ -296,6 +337,24 @@ class BouboumClient(packets.protocol.TFMClientProtocol):
 			p.writeByte(3) # y
 
 		#p.writeBytes('\x00\x01\x00\x06SpaowiTU\x01\x00\x00\x00\x04\xe2\x00\x00')
+		self.sendBData(p)
+
+	def sendShopList(self):
+		p = ByteArray()
+		p.writeByte(102)
+		p.writeByte(70)
+
+		p.writeInt(self.nutsCount)
+		p.writeByte(self.look) # current fur
+		shopList = '0,0;17,50;3,100;4,200;6,400;19,500;2,800;7,1000;9,1000;8,1500;5,2000'.split(';')#{0: 0, 1: 0, 2: 17, 3: 50, 4: 3, 5: 100, 6: 4, 7: 200, 8: 6, 9: 400, 10: 19, 11: 500, 12: 2, 13: 800, 14: 7, 15: 1000, 16: 9, 17: 1000, 18: 8, 19: 1500, 20: 5, 21: 2000} #[0, 0, 17, 0, 3, 100, 4, 200, 6, 400, 19, 500, 2, 800, 7, 1000, 9, 1000, 8, 1500, 5, 2000]
+
+		p.writeByte(len(shopList)*2)
+
+		for x in shopList:
+			item, cost = map(int, x.split(','))
+			if item in self.shopitems: cost = 0
+			p.writeByte(item)
+			p.writeShort(cost)
 		self.sendBData(p)
 
 	def sendRoundTime(self, s=120):
@@ -439,6 +498,15 @@ class BouboumServeur(Factory):
 	def generatePlayerCode(self):
 		self.lastPlayerCode += 1
 		return self.lastPlayerCode
+
+	def updatePlayerStats(self, username, nutsCount, look, roundCount, kills, death, gamewon, roundswon, shopitems):
+		if username.startswith("*"): pass
+		else:
+			shopitems = json.dumps(shopitems)
+			self.Cursor.execute('UPDATE users SET shopnuts=%s, look=%s, rounds=%s, kills=%s, death=%s, gamewon=%s, roundswon=%s, shopitems=%s WHERE username=%s',
+				(int(nutsCount), int(look), int(roundCount), int(kills), int(death), int(gamewon), int(roundswon), shopitems, username)
+			)
+			self.Database.commit()
 
 
 if __name__ == "__main__":
